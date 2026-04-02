@@ -2454,11 +2454,12 @@ local function HandleSummons()
                         break
                     end
                 end
-
-            if not found then
-                FireBossRemote(bossName, diff)
-                task.wait(0.5)
-                break
+                
+                if not found then
+                    FireBossRemote(bossName, diff)
+                    task.wait(0.5)
+                    break
+                end
             end
         end
     end
@@ -3078,22 +3079,22 @@ local function GetOtherTarget()
                     if name:find("strongest") and (
                         (lowerSelected:find("history") and name:find("history")) or
                         (lowerSelected:find("today") and name:find("today"))
-                        ) then
-                            isMatch = true
-                        end
-                    elseif name:find(lowerSelected) then
-                            isMatch = true
-                        end 
-                        
-                        if isMatch and IsValidTarget(npc) then
-                            local island = GetNearestIsland(npc:GetPivot().Position, npc.Name)
-                            return npc, island, "Boss"
-                        end
+                    ) then
+                        isMatch = true
                     end
+                elseif name:find(lowerSelected) then
+                    isMatch = true
+                end 
+                        
+                if isMatch and IsValidTarget(npc) then
+                    local island = GetNearestIsland(npc:GetPivot().Position, npc.Name)
+                    return npc, island, "Boss"
                 end
             end
-        return nil
+        end
     end
+    return nil
+end
 
 local function GetSummonTarget()
     if not Toggles.SummonBossFarm.Value then return nil end
