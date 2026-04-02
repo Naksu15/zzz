@@ -1,6 +1,3 @@
---[[
-	WARNING: Heads up! This script has not been verified by ScriptBlox. Use at your own risk!
-]]
 if getgenv().celina_Running then
     warn("Script already running!")
     return
@@ -2466,18 +2463,25 @@ local function HandleSummons()
     end
 
     if Toggles.AutoSummon.Value then
-        local selected = Options.SelectedSummon.Value
-        if selected then
-            local found = false
-            for _, v in pairs(PATH.Mobs:GetChildren()) do
-                if IsStrictBossMatch(v.Name, selected) then
-                    found = true break
-                end
-            end
+        local selected = Options.SelectedSummon.Value or {}
+        local summonDiff = Options.SelectedSummonDiff.Value or "Normal"
+        
+        for bossName, enabled in pairs(selected) do
+            if enabled then
+                local found = false
 
-            if not found then
-                FireBossRemote(selected, Options.SelectedSummonDiff.Value or "Normal")
-                task.wait(0.5)
+                for _, v in pairs(PATH.Mobs:GetChildren()) do
+                    if IsStrictBossMatch(v.Name, bossName) then
+                        found = true
+                        break
+                    end
+                end
+                
+                if not found then
+                    FireBossRemote(bossName, summonDiff)
+                    task.wait(0.5)
+                    break
+                end
             end
         end
     end
@@ -3088,20 +3092,34 @@ end
 
 local function GetSummonTarget()
     if not Toggles.SummonBossFarm.Value then return nil end
-    local selected = Options.SelectedSummon.Value
-    if not selected then return nil end
 
-    local workspaceName = SummonMap[selected] or (selected .. "Boss")
+    local selected = Options.SelectedSummon.Value or {}
+    local enabledSummons = {}
 
-    for _, npc in pairs(PATH.Mobs:GetChildren()) do
-        if npc.Name:lower():find(workspaceName:lower()) then
-            if IsValidTarget(npc) then
-                return npc, "Boss", "Boss"
+    for bossName, enabled in pairs(selected) do
+        if enabled then
+            table.insert(enabledSummons, bossName)
             end
         end
+
+        table.sort(enabledSummons)
+
+        if #enabledSummons == 0 then 
+            return nil 
+        end
+
+        for _, summonName in ipairs(enabledSummons) do
+            local workspaceName = SummonMap[summonName] or (summonName .. "Boss")
+
+            for _, npc in pairs(PATH.Mobs:GetChildren()) do
+                if npc.Name:lower():find(workspaceName:lower()) and IsValidTarget(npc) then
+                    return npc, "Boss", "Boss"
+                end
+            end
+        end
+
+        return nil
     end
-    return nil
-end
 
 local function GetWorldBossTarget()
     if Toggles.AllBossesFarm.Value then
@@ -4746,8 +4764,8 @@ TB_Tabs.Autofarm.T2:AddDivider()
 TB_Tabs.Autofarm.T2:AddDropdown("SelectedSummon", {
     Text = "Select Summon Boss",
     Values = Tables.SummonList,
-    Default = nil,
-    Multi = false,
+    Default = {},
+    Multi = true,
     Searchable = true,
 })
 
