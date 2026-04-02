@@ -2282,20 +2282,41 @@ local function AutoEquipArtifacts()
     end
 end
 
+local function NormalizeBossName(name)
+    return tostring(name or ""):lower():gsub("%s+", ""):gsub("[%p_]", "")
+end
+
 local function IsStrictBossMatch(npcName, targetDisplayName)
-    local n = npcName:lower():gsub("%s+", "")
-    local t = targetDisplayName:lower():gsub("%s+", "")
+    local n = NormalizeBossName(npcName)
+    local t = NormalizeBossName(targetDisplayName)
+
+    if n == "" or t == "" then
+        return false
+    end
 
     if n:find("true") and not t:find("true") then
         return false
     end
-    
-    if t:find("strongest") then
-        local era = t:find("history") and "history" or "today"
-        return n:find("strongest") and n:find(era)
+
+    local aliases = {
+        strongestinhistory = {"strongesthistory", "strongestinhistory"},
+        strongesthistory = {"strongesthistory", "strongestinhistory"},
+        strongestoftoday = {"strongesttoday", "strongestoftoday"},
+        strongesttoday = {"strongesttoday", "strongestoftoday"},
+        strongestshinobi = {"strongestshinobi"},
+    }
+
+    local targetAliases = aliases[t]
+    if targetAliases then
+        for _, alias in ipairs(targetAliases) do
+            if n:find(alias) then
+                return true
+            end
+        end
+        return false
     end
 
-    return n:find(t)
+    return n:find(t) ~= nil or t:find(n) ~= nil
 end
 
 local function AutoUpgradeLoop(mode)
@@ -3128,39 +3149,45 @@ local function GetSummonTarget()
     end
 
 local function GetWorldBossTarget()
-    if Toggles.AllBossesFarm.Value then
-        for _, npc in pairs(PATH.Mobs:GetChildren()) do
-            local name = npc.Name
-            if name:find("Boss") and not table.find(Tables.MiniBossList, name) then
-                if IsValidTarget(npc) then
-                    local island = "Boss"
-                    for dName, iName in pairs(Shared.BossTIMap) do
-                        if IsStrictBossMatch(name, dName) then
-                            island = iName
-                            break
-                        end
+    if Toggles.BossesFarm.Value then
+        local selected = Options.SelectedBosses.Value or {}
+
+        for bossDisplayName, isEnabled in pairs(selected) do
+            if isEnabled then
+                for _, npc in pairs(PATH.Mobs:GetChildren()) do
+                    if npc:IsA("Model")
+                        and not table.find(Tables.MiniBossList, npc.Name)
+                        and IsStrictBossMatch(npc.Name, bossDisplayName)
+                        and IsValidTarget(npc) then
+                        local island = Shared.BossTIMap[bossDisplayName] or GetNearestIsland(npc:GetPivot().Position, npc.Name)
+                        return npc, island, "Boss"
                     end
-                    return npc, island, "Boss"
                 end
             end
         end
     end
 
-    if Toggles.BossesFarm.Value then
-        local selected = Options.SelectedBosses.Value or {}
-        for bossDisplayName, isEnabled in pairs(selected) do
-            if isEnabled then
-                for _, npc in pairs(PATH.Mobs:GetChildren()) do
-                    if IsStrictBossMatch(npc.Name, bossDisplayName) and not table.find(Tables.MiniBossList, npc.Name) then
-                        if IsValidTarget(npc) then
-                            local island = Shared.BossTIMap[bossDisplayName] or "Boss"
-                            return npc, island, "Boss"
-                        end
+    if Toggles.AllBossesFarm.Value then
+        for _, npc in pairs(PATH.Mobs:GetChildren()) do
+            local name = npc.Name
+            if npc:IsA("Model")
+                and name:find("Boss")
+                and not table.find(Tables.MiniBossList, name)
+                and IsValidTarget(npc) then
+                local island = GetNearestIsland(npc:GetPivot().Position, npc.Name)
+
+                for dName, iName in pairs(Shared.BossTIMap) do
+                    if IsStrictBossMatch(name, dName) then
+                        island = iName
+                        break
                     end
                 end
+
+                return npc, island, "Boss"
             end
         end
     end
+
     return nil
 end
 
@@ -4422,10 +4449,6 @@ local GB = {
         Left = {
             Config = Tabs.Webhook:AddLeftGroupbox("Config", "wrench"),
         },
-
-        Right = {
-            Status = Tabs.Webhook:AddRightGroupbox("Status & Server Hop", "activity"),
-        }
     }
 }
 
@@ -4846,7 +4869,7 @@ TB_Tabs.Autofarm.T2:AddDropdown("SelectedOtherSummonDiff", {
     Text = "Select Difficulty",
     Values = Tables.DiffList,
     Default = nil,
-    Multi = true,
+    Multi = false,
     AllowNull = true,
     Searchable = true,
 })
@@ -5027,37 +5050,6 @@ TB_Tabs.Autofarm.T4:AddSlider("InstaKillHP", {
     Callback = function(a)
         tonumber(a)
     end
-})
-
-TB_Tabs.ServerHop = TB_Tabs.ServerHop or {}
-TB_Tabs.ServerHop.Main = TB_Tabs.ServerHop.Main or Tabs.Misc:AddLeftGroupbox("Server Hop")
-
-TB_Tabs.ServerHop.Main:AddToggle("HopOnAvailableSelectedBosses", {
-    Text = "Hop On Available Selected Bosses",
-    Default = false,
-})
-
-TB_Tabs.ServerHop.Main:AddToggle("HopOnNoAvailableSelectedBosses", {
-    Text = "Hop On No Available Selected Bosses",
-    Default = false,
-})
-
-TB_Tabs.ServerHop.Main:AddToggle("HopOnNoAvailableBosses", {
-    Text = "Hop On No Available Bosses",
-    Default = false,
-})
-
-TB_Tabs.ServerHop.Main:AddDropdown("SelectedHopMethod", {
-    Text = "Select Hop Method",
-    Values = {"Public"},
-    Default = "Public",
-    Multi = false,
-    Searchable = false,
-})
-
-TB_Tabs.ServerHop.Main:AddToggle("AutoExecuteOnHop", {
-    Text = "Auto Execute",
-    Default = false,
 })
 
 TB_Tabs.Autofarm.T4:AddInput("InstaKillMinHP", {
@@ -6521,299 +6513,6 @@ task.spawn(function()
         if tick() - Shared.KillTick < (tonumber(Options.TargetTPCD.Value) or 0) then continue end
 
         HandleSummons()
-
-        local HopState = {
-    LastHop = 0,
-    Busy = false,
-    TriedServers = {},
-}
-
-local function NormalizeBossName(name)
-    return tostring(name or ""):lower():gsub("%s+", "")
-end
-
-local function IsBossAliveModel(model)
-    if not model or not model.Parent then return false end
-    local hum = model:FindFirstChildOfClass("Humanoid")
-    return hum and hum.Health > 0
-end
-
-local function BossNameMatches(npcName, targetName)
-    local npc = NormalizeBossName(npcName)
-    local target = NormalizeBossName(targetName)
-
-    if target == "" then
-        return false
-    end
-
-    if npc == target then
-        return true
-    end
-
-    if target:find("strongest") then
-        local wantHistory = target:find("history")
-        local wantToday = target:find("today")
-
-        if npc:find("strongest") then
-            if wantHistory and npc:find("history") then return true end
-            if wantToday and npc:find("today") then return true end
-        end
-    end
-
-    if npc:find(target) or target:find(npc) then
-        return true
-    end
-
-    return false
-end
-
-local function IsSelectedBossAlive(targetName)
-    for _, npc in ipairs(PATH.Mobs:GetChildren()) do
-        if npc:IsA("Model") and IsBossAliveModel(npc) then
-            if BossNameMatches(npc.Name, targetName) then
-                return true, npc
-            end
-        end
-    end
-    return false, nil
-end
-
-local function IsAnyBossAlive()
-    for _, npc in ipairs(PATH.Mobs:GetChildren()) do
-        if npc:IsA("Model") and IsBossAliveModel(npc) then
-            local clean = npc.Name:gsub("%d+$", "")
-            if clean:find("Boss")
-                or clean:lower():find("strongest")
-                or clean:lower():find("rimuru")
-                or clean:lower():find("anos")
-                or clean:lower():find("aizen")
-                or clean:lower():find("atomic")
-            then
-                return true, npc
-            end
-        end
-    end
-    return false, nil
-end
-
-local function GetWantedBossList()
-    local wanted = {}
-    local seen = {}
-
-    local function AddBoss(name)
-        if not name or name == "" then return end
-        local key = NormalizeBossName(name)
-        if key == "" or seen[key] then return end
-        seen[key] = true
-        table.insert(wanted, name)
-    end
-
-    if Toggles.BossesFarm and Toggles.BossesFarm.Value then
-        for bossName, enabled in pairs(Options.SelectedBosses.Value or {}) do
-            if enabled then
-                AddBoss(bossName)
-            end
-        end
-    end
-
-    if (Toggles.AutoSummon and Toggles.AutoSummon.Value) or (Toggles.SummonBossFarm and Toggles.SummonBossFarm.Value) then
-        for bossName, enabled in pairs(Options.SelectedSummon.Value or {}) do
-            if enabled then
-                AddBoss(bossName)
-            end
-        end
-    end
-
-    if Toggles.PityBossFarm and Toggles.PityBossFarm.Value then
-        for bossName, enabled in pairs(Options.SelectedBuildPity.Value or {}) do
-            if enabled then
-                AddBoss(bossName)
-            end
-        end
-
-        local pityUse = Options.SelectedUsePity.Value
-        if pityUse and pityUse ~= "" then
-            AddBoss(pityUse)
-        end
-    end
-
-    if (Toggles.AutoOtherSummon and Toggles.AutoOtherSummon.Value) or (Toggles.OtherSummonFarm and Toggles.OtherSummonFarm.Value) then
-        for bossName, enabled in pairs(Options.SelectedOtherSummon.Value or {}) do
-            if enabled then
-                AddBoss(bossName)
-            end
-        end
-    end
-
-    return wanted
-end
-
-local function HasAnySelectedBossAvailable()
-    local wanted = GetWantedBossList()
-
-    for _, bossName in ipairs(wanted) do
-        local ok, npc = IsSelectedBossAlive(bossName)
-        if ok then
-            return true, bossName, npc
-        end
-    end
-
-    return false, nil, nil
-end
-
-local function CanServerHop()
-    return not HopState.Busy and (tick() - HopState.LastHop >= 8)
-end
-
-local function QueueScriptOnTeleport()
-    if not Support.QueueOnTeleport then return end
-    if not Toggles.AutoExecuteOnHop or not Toggles.AutoExecuteOnHop.Value then return end
-
-    local queued = [[
-repeat task.wait() until game:IsLoaded()
--- put your loader here
--- loadstring(game:HttpGet("github.com/Naksu15/zzz/blob/main/test1"))()
-]]
-
-    pcall(function()
-        queue_on_teleport(queued)
-    end)
-end
-
-local function GetServerPage(cursor)
-    local req = request or http_request
-    if typeof(req) ~= "function" then
-        return nil
-    end
-
-    local url = "https://games.roblox.com/v1/games/" .. tostring(game.PlaceId) .. "/servers/Public?sortOrder=Asc&limit=100"
-    if cursor and cursor ~= "" then
-        url = url .. "&cursor=" .. cursor
-    end
-
-    local ok, res = pcall(function()
-        return req({
-            Url = url,
-            Method = "GET",
-            Headers = {
-                ["Content-Type"] = "application/json"
-            }
-        })
-    end)
-
-    if not ok or not res or not res.Body then
-        return nil
-    end
-
-    local ok2, data = pcall(function()
-        return HttpService:JSONDecode(res.Body)
-    end)
-
-    if not ok2 then
-        return nil
-    end
-
-    return data
-end
-
-local function FindServerToHop()
-    local cursor = nil
-    local checkedPages = 0
-
-    repeat
-        checkedPages = checkedPages + 1
-        local page = GetServerPage(cursor)
-        if not page or not page.data then
-            break
-        end
-
-        for _, server in ipairs(page.data) do
-            local id = server.id
-            local playing = tonumber(server.playing) or 0
-            local maxPlayers = tonumber(server.maxPlayers) or 0
-
-            if id
-                and id ~= game.JobId
-                and not HopState.TriedServers[id]
-                and playing < maxPlayers
-            then
-                return id
-            end
-        end
-
-        cursor = page.nextPageCursor
-    until not cursor or checkedPages >= 8
-
-    return nil
-end
-
-local function HopToServer(jobId)
-    if not jobId or jobId == game.JobId then
-        return false
-    end
-
-    HopState.Busy = true
-    HopState.LastHop = tick()
-    HopState.TriedServers[jobId] = true
-
-    QueueScriptOnTeleport()
-
-    pcall(function()
-        TeleportService:TeleportToPlaceInstance(game.PlaceId, jobId, Plr)
-    end)
-
-    task.delay(10, function()
-        HopState.Busy = false
-    end)
-
-    return true
-end
-
-local function HandleBossServerHop()
-    if not CanServerHop() then
-        return
-    end
-
-    local hopOnAvailableSelected = Toggles.HopOnAvailableSelectedBosses and Toggles.HopOnAvailableSelectedBosses.Value
-    local hopOnNoAvailableSelected = Toggles.HopOnNoAvailableSelectedBosses and Toggles.HopOnNoAvailableSelectedBosses.Value
-    local hopOnNoBosses = Toggles.HopOnNoAvailableBosses and Toggles.HopOnNoAvailableBosses.Value
-
-    if not hopOnAvailableSelected and not hopOnNoAvailableSelected and not hopOnNoBosses then
-        return
-    end
-
-    local selectedAvailable, selectedBossName = HasAnySelectedBossAvailable()
-    local anyBossAvailable = IsAnyBossAlive()
-
-    local shouldHop = false
-
-    if hopOnAvailableSelected and selectedAvailable then
-        shouldHop = true
-        Library:Notify("Found selected boss: " .. tostring(selectedBossName) .. " | hopping", 2)
-    elseif hopOnNoAvailableSelected and not selectedAvailable then
-        shouldHop = true
-        Library:Notify("No selected boss found | hopping", 2)
-    elseif hopOnNoBosses and not anyBossAvailable then
-        shouldHop = true
-        Library:Notify("No boss available in server | hopping", 2)
-    end
-
-    if not shouldHop then
-        return
-    end
-
-    local targetServer = FindServerToHop()
-    if targetServer then
-        HopToServer(targetServer)
-    end
-end
-
-task.spawn(function()
-    while getgenv().celina_Running do
-        task.wait(3)
-        pcall(HandleBossServerHop)
-    end
-end)
 
         local currentPity, maxPity = GetCurrentPity()
         local isPityReady = Toggles.PityBossFarm.Value and currentPity >= (maxPity - 1)
