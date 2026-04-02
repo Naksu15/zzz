@@ -6672,7 +6672,7 @@ local function QueueScriptOnTeleport()
     local queued = [[
 repeat task.wait() until game:IsLoaded()
 -- put your loader here
--- loadstring(game:HttpGet("YOUR_URL"))()
+-- loadstring(game:HttpGet("github.com/Naksu15/zzz/blob/main/test1"))()
 ]]
 
     pcall(function()
